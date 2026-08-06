@@ -602,3 +602,18 @@ def sample_bernoulli_sparse(prob_sparse, K=1):
     out = csr_matrix((draws, prob_csr.indices, prob_csr.indptr), shape=prob_csr.shape)
     out.eliminate_zeros()
     return out
+
+def fixed_num_connectivity_sparse(sources, targets, num, sigma, weight):
+    n_sources = sources.shape[0]
+    n_targets = targets.shape[0]
+    W = sp.lil_matrix((n_sources, n_targets), dtype=float)
+
+    for i, src in enumerate(sources):
+        d = np.sqrt(((targets - src) ** 2).sum(axis=1))
+        in_range = np.where(d < sigma)[0]
+        if len(in_range) > 0:
+            np.random.shuffle(in_range)
+            chosen = in_range[:num]
+            W[i, chosen] = weight
+
+    return W.tocsr()
