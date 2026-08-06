@@ -617,3 +617,99 @@ def fixed_num_connectivity_sparse(sources, targets, num, sigma, weight):
             W[i, chosen] = weight
 
     return W.tocsr()
+
+def compute_prob_1d(r, l, sigma_conn):
+    
+    d = (r[:, np.newaxis] - l)
+    
+    unscaled_gaussian = np.exp(-d**2 / (2 * sigma_conn**2))
+    
+    return unscaled_gaussian
+
+
+def get_sort_indices(r_vals, l_vals):
+    
+    idx_r = np.argsort(r_vals)[::-1]
+    idx_l = np.argsort(l_vals)[::-1]
+    
+    return idx_r, idx_l
+
+def plot_weights(W, 
+                 title='Probability Mask for Connections', 
+                 xlabel='Layer i+1 Neurons', 
+                 ylabel='Layer i Neurons', 
+                 cbar_label='Connection Probability', 
+                 cmap='seismic', 
+                 vmin=None, 
+                 vmax=None):
+    
+    plt.figure(figsize=(10, 8))
+    
+    plt.imshow(W, cmap=cmap, aspect='auto', interpolation='nearest', vmin=vmin, vmax=vmax)
+    
+    cbar = plt.colorbar()
+    cbar.set_label(cbar_label, fontsize=20)
+    cbar.ax.tick_params(labelsize=16)
+    
+    plt.xlabel(xlabel, fontsize=20)
+    plt.ylabel(ylabel, fontsize=20)
+    
+    plt.xticks(fontsize=16)
+    plt.yticks(fontsize=16)
+    
+    plt.title(title, fontsize=26, fontweight='bold', pad=30)
+    
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_standalone_radial_activity(stimuli, W_Total, l_vals_L1, cx=0.5, num_bins=20, max_radius=0.5):
+    
+    fig, ax = plt.subplots(figsize=(8, 6))
+    
+    bins = np.linspace(0, max_radius, num_bins + 1)
+    bin_centers = (bins[:-1] + bins[1:]) / 2
+    
+    line_colors = ['gray', 'red', 'blue', 'purple'] 
+    
+    sort_idx_L1 = np.argsort(l_vals_L1)
+    x_L1_sorted = l_vals_L1[sort_idx_L1]
+    
+    distances = np.abs(x_L1_sorted - cx)
+    
+    max_resp = 0
+    min_resp = 0
+    
+    for i, (condition_name, A0) in enumerate(stimuli):
+        A1 = W_Total.T @ A0  
+        A1_sorted = A1[sort_idx_L1]
+        
+        bin_means = np.zeros(num_bins)
+        for j in range(num_bins):
+            in_bin = (distances >= bins[j]) & (distances < bins[j+1])
+            if np.any(in_bin):
+                bin_means[j] = np.mean(A1_sorted[in_bin])
+            else:
+                bin_means[j] = np.nan
+                
+        ax.plot(bin_centers, bin_means, marker='o', markersize=5, linestyle='-', 
+                color=line_colors[i], label=condition_name, alpha=0.8)
+        
+        if np.nanmax(bin_means) > max_resp: max_resp = np.nanmax(bin_means)
+        if np.nanmin(bin_means) < min_resp: min_resp = np.nanmin(bin_means)
+
+    ax.axhline(0, color='black', linestyle='-', alpha=0.3)
+    ax.set_title('Radial Activity Profile', fontsize=12)
+    ax.set_xlabel('Absolute Distance from Center', fontsize=12)
+    ax.set_ylabel('Avg. Input of Neurons within Distance', fontsize=12)
+    
+    y_pad = (max_resp - min_resp) * 0.2 if max_resp != min_resp else 0.5
+    ax.set_ylim(min_resp - y_pad, max_resp + y_pad)
+    
+    ax.grid(True, alpha=0.3)
+    ax.legend(fontsize=11)
+    
+    plt.tight_layout()
+    plt.show()
+
+
