@@ -11,6 +11,7 @@ from scipy.ndimage import zoom
 from PIL import Image
 from scipy.spatial.distance import cdist
 from scipy.ndimage import gaussian_filter
+from scipy.ndimage import gaussian_filter1d
 
 def apply_stimulus(radius, coords, center=(0.5, 0.5)):
     dists = np.sqrt((coords[:, 0] - center[0])**2 + (coords[:, 1] - center[1])**2)
@@ -713,3 +714,101 @@ def plot_standalone_radial_activity(stimuli, W_Total, l_vals_L1, cx=0.5, num_bin
     plt.show()
 
 
+
+def gabor_gmm_noise(n, theta, means, sx, sy, weights=None, return_labels=False):
+
+    means = np.asarray(means, float)
+    sx = np.asarray(sx, float)
+    sy = np.asarray(sy, float)
+    K = means.shape[0]
+
+    if weights is None:
+        weights = np.full(K, 1.0 / K)
+    else:
+        weights = np.asarray(weights, float)
+        weights = weights / weights.sum()
+
+    comp = np.random.choice(K, size=n, p=weights)       
+    z = np.random.randn(n, 2)
+    x = z[:, 0] * sx[comp] + means[comp, 0]
+    y = z[:, 1] * sy[comp] + means[comp, 1]
+
+    cos_t, sin_t = np.cos(theta), np.sin(theta)          
+    x_rot = x * cos_t - y * sin_t
+    y_rot = x * sin_t + y * cos_t
+    out = np.column_stack((x_rot, y_rot))
+    return (out, comp) if return_labels else out
+
+
+def gabor_lobes(n_lobes, spacing, sx, sy, weight_falloff=1.0):
+    k = np.arange(n_lobes) - (n_lobes - 1) / 2.0        
+    offs = k * spacing
+    means = np.column_stack((np.zeros_like(offs), offs))
+    w = weight_falloff ** np.abs(k)
+    return means, np.full(n_lobes, sx), np.full(n_lobes, sy), w / w.sum()
+
+
+def gabor_gmm_from_mix(n, theta, mix, sx, sy):
+    if mix == 3:
+        means   = [[0.0, 0.0], [0.0, +0.20], [0.0, -0.20]]
+        sx_arr  = [sx[0], sx[1], sx[1]]
+        sy_arr  = [sy[0], sy[1], sy[1]]
+        weights = [0.5, 0.25, 0.25]
+    elif mix == 2:
+        means   = [[0.0, +0.10], [0.0, -0.10]]
+        sx_arr  = [sx[0], sx[0]]
+        sy_arr  = [sy[0], sy[0]]
+        weights = [0.5, 0.5]
+    else:
+        raise ValueError("mix must be 2 or 3")
+    return gabor_gmm_noise(n, theta, means, sx_arr, sy_arr, weights)
+
+
+
+def gabor_noise(n, theta, sigma_x, sigma_y, freq, phase=0.0):
+    y = np.random.randn(4 * n) * sigma_y
+    y = y[np.random.rand(4 * n) < (np.cos(2 * np.pi * freq * y + phase) + 1) / 2][:n]
+    x = np.random.randn(n) * sigma_x
+    ct, st = np.cos(theta), np.sin(theta)
+    return np.column_stack((x * ct - y * st, x * st + y * ct))
+
+
+def grating(coords, theta, sf, phase, contrast=1.0, mean_lum=0.5,
+            center=(0.5, 0.5)):
+    dx = coords[:, 0] - center[0]
+    dy = coords[:, 1] - center[1]
+    proj = -dx * np.sin(theta) + dy * np.cos(theta)
+    return mean_lum * (1.0 + contrast * np.sin(2.0 * np.pi * sf * proj + phase))
+
+
+def f1_f0(r, spont=0.0):
+    r = np.asarray(r)
+    m = r.shape[0]
+    X = np.fft.rfft(r, axis=0) / m
+    F0 = X[0].real - np.asarray(spont)
+    F1 = 2.0 * np.abs(X[1])
+    with np.errstate(divide='ignore', invalid='ignore'):
+        ratio = np.where(F0 > 1e-12, F1 / F0, np.nan)
+    return dict(F0=F0, F1=F1, F2=2.0 * np.abs(X[2]), ratio=ratio,
+                peak=r.max(axis=0))
+
+
+def plot_grating(coords, n, theta, sf, phases=(0, np.pi / 2, np.pi, 3 * np.pi / 2),
+                 zoom=None, mean_lum=0.5, **stim_kw):
+    phases = np.atleast_1d(phases)
+    fig, axes = plt.subplots(1, len(phases), figsize=(3.2 * len(phases), 3.4),
+                             squeeze=False)
+    lin = np.linspace(0, 1, n)
+    m = np.abs(lin - 0.5) <= zoom if zoom else np.ones(n, bool)
+    for ax, ph in zip(axes[0], phases):
+        img = grating(coords, theta, sf, ph, mean_lum=mean_lum,
+                      **stim_kw).reshape(n, n)[np.ix_(m, m)]
+        ax.imshow(img, origin='lower', cmap='gray', vmin=0, vmax=2 * mean_lum,
+                  extent=[lin[m][0], lin[m][-1], lin[m][0], lin[m][-1]])
+        ax.set_title(f'phase {np.degrees(ph):.0f}\u00b0', fontsize=10)
+        ax.set_xlabel('x')
+    axes[0][0].set_ylabel('y')
+    fig.suptitle(f'stripes at {np.degrees(theta):.0f}\u00b0, {sf:g} cycles/unit',
+                 fontsize=11)
+    plt.tight_layout()
+    return fig
