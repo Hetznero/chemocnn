@@ -1,6 +1,8 @@
 import os
 import numpy as np
+import scipy.sparse as sp
 import matplotlib.pyplot as plt
+from matplotlib.colors import TwoSlopeNorm
 from scipy.spatial import cKDTree
 from scipy.sparse import csr_matrix, csc_matrix, bmat, issparse
 from scipy.spatial import distance
@@ -233,10 +235,13 @@ def plot_stim_act(A, x, y, vmin=-1, vmax=1,
     plt.show()
 
 
-def plot_stim_act_image(A, x, y, grid_size=(50, 50), sigma=1, vmin=-1, vmax=1,
-                        title=None, xlabel='X Coordinate', 
-                        ylabel='Y Coordinate', cbar_label='Average Value Magnitude'):
-    
+def plot_stim_act_image(A, x, y, grid_size=(50, 50), sigma=1, zoom=1,
+                        vmin=-1, vmax=1,
+                        title='Values Plotted at Specific Coordinates',
+                        xlabel='X Coordinate',
+                        ylabel='Y Coordinate',
+                        cbar_label='Average Value Magnitude'):
+
     plt.figure(figsize=(8, 6))
 
     if isinstance(grid_size, int):
@@ -246,36 +251,45 @@ def plot_stim_act_image(A, x, y, grid_size=(50, 50), sigma=1, vmin=-1, vmax=1,
 
     sum_A, x_edges, y_edges = np.histogram2d(x, y, bins=bins, weights=A)
     count, _, _ = np.histogram2d(x, y, bins=bins)
-    
+
     with np.errstate(divide='ignore', invalid='ignore'):
         avg_A = np.true_divide(sum_A, count)
-        
+
     valid_mask = count > 0
-    
+
     avg_A_filled = np.nan_to_num(avg_A, nan=0.0)
-    
+
     smoothed_A = gaussian_filter(avg_A_filled, sigma=sigma)
     smoothed_mask = gaussian_filter(valid_mask.astype(float), sigma=sigma)
-    
+
     with np.errstate(divide='ignore', invalid='ignore'):
         smoothed_avg_A = smoothed_A / smoothed_mask
-        
+
     smoothed_avg_A[smoothed_mask < 0.01] = np.nan
-    
-    im = plt.imshow(smoothed_avg_A.T, origin='lower', 
+
+    if zoom > 1.0:
+        half = 0.5 / zoom
+        ix0, ix1 = np.searchsorted(x_edges, [0.5 - half, 0.5 + half])
+        iy0, iy1 = np.searchsorted(y_edges, [0.5 - half, 0.5 + half])
+        ix1 = min(ix1, len(x_edges) - 1)
+        iy1 = min(iy1, len(y_edges) - 1)
+        smoothed_avg_A = smoothed_avg_A[ix0:ix1, iy0:iy1]
+        x_edges = x_edges[ix0:ix1 + 1]
+        y_edges = y_edges[iy0:iy1 + 1]
+
+    im = plt.imshow(smoothed_avg_A.T, origin='lower',
                     extent=[x_edges[0], x_edges[-1], y_edges[0], y_edges[-1]],
                     cmap='seismic', alpha=0.6, vmin=vmin, vmax=vmax)
 
-    plt.colorbar(im, label=cbar_label)
+    cbar = plt.colorbar(im)
+    cbar.set_label(cbar_label, size=16)
 
-    if title is None:
-        title = f'Smoothed Average Activity (sigma={sigma})'
-        
-    plt.title(title)
-    plt.xlabel(xlabel)
-    plt.ylabel(ylabel)
-    
-    plt.grid(False) 
+    plt.title(title, fontsize=16, pad=20)
+    plt.xlabel(xlabel, fontsize=16)
+    plt.ylabel(ylabel, fontsize=16)
+    #plt.grid(True, alpha=0.3)
+    plt.xlim(x_edges[0], x_edges[-1])
+    plt.ylim(y_edges[0], y_edges[-1])
 
     plt.show()
 
@@ -604,20 +618,46 @@ def sample_bernoulli_sparse(prob_sparse, K=1):
     out.eliminate_zeros()
     return out
 
+# def fixed_num_connectivity_sparse(sources, targets, num, sigma, weight):
+#     n_sources = sources.shape[0]
+#     n_targets = targets.shape[0]
+#     W = sp.lil_matrix((n_sources, n_targets), dtype=float)
+
+#     for i, src in enumerate(sources):
+#         d = np.sqrt(((targets - src) ** 2).sum(axis=1))
+#         in_range = np.where(d < sigma)[0]
+#         if len(in_range) > 0:
+#             np.random.shuffle(in_range)
+#             chosen = in_range[:num]
+#             W[i, chosen] = weight
+
+#     return W.tocsr()
+
 def fixed_num_connectivity_sparse(sources, targets, num, sigma, weight):
-    n_sources = sources.shape[0]
-    n_targets = targets.shape[0]
-    W = sp.lil_matrix((n_sources, n_targets), dtype=float)
+    n_s, n_t = len(sources), len(targets)
+    if n_s == 0 or n_t == 0:
+        return csr_matrix((n_s, n_t))
 
-    for i, src in enumerate(sources):
-        d = np.sqrt(((targets - src) ** 2).sum(axis=1))
-        in_range = np.where(d < sigma)[0]
-        if len(in_range) > 0:
-            np.random.shuffle(in_range)
-            chosen = in_range[:num]
-            W[i, chosen] = weight
+    tree = cKDTree(targets)
+    nbrs = tree.query_ball_point(sources, r=sigma, workers=-1)
 
-    return W.tocsr()
+    rows, cols = [], []
+    for i, nb in enumerate(nbrs):
+        k = len(nb)
+        if k == 0:
+            continue
+        nb = np.asarray(nb)
+        if k > num:
+            nb = nb[np.random.choice(k, num, replace=False)]
+        rows.append(np.full(nb.size, i))
+        cols.append(nb)
+
+    if not rows:
+        return csr_matrix((n_s, n_t))
+
+    rows = np.concatenate(rows)
+    cols = np.concatenate(cols)
+    return csr_matrix((np.full(rows.size, weight), (rows, cols)), shape=(n_s, n_t))
 
 def compute_prob_1d(r, l, sigma_conn):
     
@@ -664,7 +704,7 @@ def plot_weights(W,
     plt.show()
 
 
-def plot_standalone_radial_activity(stimuli, W_Total, l_vals_L1, cx=0.5, num_bins=20, max_radius=0.5):
+def plot_standalone_radial_activity(stimuli, W_Total, l_vals_L1, cx=0.5, num_bins=50, max_radius=0.5):
     
     fig, ax = plt.subplots(figsize=(8, 6))
     
@@ -766,8 +806,8 @@ def gabor_gmm_from_mix(n, theta, mix, sx, sy):
 
 
 def gabor_noise(n, theta, sigma_x, sigma_y, freq, phase=0.0):
-    y = np.random.randn(4 * n) * sigma_y
-    y = y[np.random.rand(4 * n) < (np.cos(2 * np.pi * freq * y + phase) + 1) / 2][:n]
+    y = np.random.randn(10 * n) * sigma_y
+    y = y[np.random.rand(10 * n) < (np.cos(2 * np.pi * freq * y + phase) + 1) / 2][:n]
     x = np.random.randn(n) * sigma_x
     ct, st = np.cos(theta), np.sin(theta)
     return np.column_stack((x * ct - y * st, x * st + y * ct))
@@ -812,3 +852,55 @@ def plot_grating(coords, n, theta, sf, phases=(0, np.pi / 2, np.pi, 3 * np.pi / 
                  fontsize=11)
     plt.tight_layout()
     return fig
+
+def apply_stimulus_1d(radius, coords, center=0.5):
+    dists = np.abs(coords - center)
+    return (dists <= radius).astype(float)
+
+
+def plot_standalone_radial_activity(stimuli, W_Total, l_vals_L1, center=(0.5, 0.5),
+                                    num_bins=50, max_radius=0.5):
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+
+    bins = np.linspace(0, max_radius, num_bins + 1)
+    bin_centers = (bins[:-1] + bins[1:]) / 2
+
+    line_colors = ['gray', 'red', 'blue', 'purple']
+
+    distances = np.sqrt((l_vals_L1[:, 0] - center[0])**2 +
+                        (l_vals_L1[:, 1] - center[1])**2)
+
+    max_resp = 0
+    min_resp = 0
+
+    for i, (condition_name, A0) in enumerate(stimuli):
+        A1 = np.asarray(W_Total.T @ A0).ravel()
+
+        bin_means = np.zeros(num_bins)
+        for j in range(num_bins):
+            in_bin = (distances >= bins[j]) & (distances < bins[j+1])
+            if np.any(in_bin):
+                bin_means[j] = np.mean(A1[in_bin])
+            else:
+                bin_means[j] = np.nan
+
+        ax.plot(bin_centers, bin_means, marker='o', markersize=5, linestyle='-',
+                color=line_colors[i % len(line_colors)], label=condition_name, alpha=0.8)
+
+        if np.nanmax(bin_means) > max_resp: max_resp = np.nanmax(bin_means)
+        if np.nanmin(bin_means) < min_resp: min_resp = np.nanmin(bin_means)
+
+    ax.axhline(0, color='black', linestyle='-', alpha=0.3)
+    ax.set_title('Radial Activity Profile', fontsize=12)
+    ax.set_xlabel('Euclidean Distance from Center', fontsize=12)
+    ax.set_ylabel('Avg. Input of Neurons within Distance', fontsize=12)
+
+    y_pad = (max_resp - min_resp) * 0.2 if max_resp != min_resp else 0.5
+    ax.set_ylim(min_resp - y_pad, max_resp + y_pad)
+
+    ax.grid(True, alpha=0.3)
+    ax.legend(fontsize=11)
+
+    plt.tight_layout()
+    plt.show()
