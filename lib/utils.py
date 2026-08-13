@@ -1,5 +1,7 @@
 import os
 import numpy as np
+from tqdm.auto import tqdm
+import time
 import scipy.sparse as sp
 import matplotlib.pyplot as plt
 from matplotlib.colors import TwoSlopeNorm
@@ -704,7 +706,7 @@ def plot_weights(W,
     plt.show()
 
 
-def plot_standalone_radial_activity(stimuli, W_Total, l_vals_L1, cx=0.5, num_bins=50, max_radius=0.5):
+def plot_standalone_radial_activity_1d(stimuli, W_Total, l_vals_L1, cx=0.5, num_bins=50, max_radius=0.5):
     
     fig, ax = plt.subplots(figsize=(8, 6))
     
