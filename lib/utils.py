@@ -906,3 +906,22 @@ def plot_standalone_radial_activity(stimuli, W_Total, l_vals_L1, center=(0.5, 0.
 
     plt.tight_layout()
     plt.show()
+
+def plot_single_grating(coords, n, theta, sf, phase=0, zoom=None, mean_lum=0.5, **stim_kw):
+    fig, ax = plt.subplots(figsize=(6, 6))
+    
+    lin = np.linspace(0, 1, n)
+    m = np.abs(lin - 0.5) <= zoom if zoom else np.ones(n, bool)
+    
+    img = grating(coords, theta, sf, phase, mean_lum=mean_lum, **stim_kw).reshape(n, n)[np.ix_(m, m)]
+    
+    ax.imshow(img, origin='lower', cmap='gray', vmin=0, vmax=2 * mean_lum,
+              extent=[lin[m][0], lin[m][-1], lin[m][0], lin[m][-1]])
+    
+    ax.set_title(f'phase {np.degrees(phase):.0f}°', fontsize=10)
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
+    fig.suptitle(f'stripes at {np.degrees(theta):.0f}°, {sf:g} cycles/unit', fontsize=11)
+    
+    plt.tight_layout()
+    return fig
