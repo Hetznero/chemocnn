@@ -44,5 +44,5 @@ pip install -r requirements.txt
 The simulations are Jupyter notebooks. Start Jupyter and open any notebook in `simulations/`:
 
 ```bash
-jupyter notebook
+jupyter lab
 ```
